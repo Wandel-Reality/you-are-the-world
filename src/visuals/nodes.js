@@ -17,6 +17,14 @@ export class NodeField {
     this.visibleNodeCount = 0;
     this.revealProgress = 0;
 
+    this.audio = {
+      bass: 0,
+      mids: 0,
+      highs: 0,
+      level: 0,
+      peak: 0,
+    };
+
     this.nodeGroup = new THREE.Group();
     this.lineGroup = new THREE.Group();
     this.organicGroup = new THREE.Group();
@@ -294,7 +302,9 @@ export class NodeField {
     };
   }
 
-  update(delta, elapsedTime) {
+  update(delta, elapsedTime, audio) {
+    this.audio = audio || this.audio;
+
     this.updateReveal(delta);
     this.updateDrift(elapsedTime);
     this.updateRepulsion(delta);
@@ -363,15 +373,22 @@ export class NodeField {
   }
 
   updateDrift(elapsedTime) {
+    const bass = this.audio?.bass || 0;
+
+    const bassBoost = 1 + bass * 2.5;
+
     for (const node of this.nodes) {
       if (!node.revealed) continue;
 
       const dx =
         Math.sin(elapsedTime * 0.9 + node.driftSeedX) *
-        CONFIG.nodes.driftAmount;
+        CONFIG.nodes.driftAmount *
+        bassBoost;
+
       const dy =
         Math.cos(elapsedTime * 0.7 + node.driftSeedY) *
-        CONFIG.nodes.driftAmount;
+        CONFIG.nodes.driftAmount *
+        bassBoost;
 
       node.mesh.position.x = node.baseX + dx;
       node.mesh.position.y = node.baseY + dy;
@@ -482,7 +499,10 @@ export class NodeField {
     const glowBoost = node.activationGlow * 0.55;
 
     organic.core.material.opacity = 0.1 + life * 0.14 + glowBoost * 0.25;
-    organic.hotspot.material.opacity = 0.08 + life * 0.18 + glowBoost * 0.35;
+    const highs = this.audio?.highs || 0;
+
+    organic.hotspot.material.opacity =
+      0.08 + life * 0.18 + glowBoost * 0.35 + highs * 0.25;
 
     organic.core.scale.setScalar(
       1 +
@@ -561,8 +581,13 @@ export class NodeField {
       );
 
       strand.line.geometry.setFromPoints(curve.getPoints(16));
+      const peak = this.audio?.peak || 0;
+
       strand.line.material.opacity =
-        0.05 + life * (0.1 + strand.thicknessBias * 0.07) + glowBoost * 0.1;
+        0.05 +
+        life * (0.1 + strand.thicknessBias * 0.07) +
+        glowBoost * 0.1 +
+        peak * 0.25;
     }
 
     // Outer wispy filaments
@@ -632,6 +657,8 @@ export class NodeField {
   }
 
   rebuildConnectors(elapsedTime) {
+    const mids = this.audio?.mids || 0;
+
     while (this.lineGroup.children.length > 0) {
       const line = this.lineGroup.children.pop();
       line.geometry.dispose();
@@ -680,10 +707,12 @@ export class NodeField {
           (a.pulse + b.pulse) * 0.06 + (a.state + b.state) * 0.015,
         );
 
+        const audioBoost = mids * 0.35;
+
         const material = new THREE.LineBasicMaterial({
           color: CONFIG.colors.line,
           transparent: true,
-          opacity: baseOpacity + energyBoost,
+          opacity: baseOpacity + energyBoost + audioBoost,
         });
 
         const line = new THREE.Line(geometry, material);

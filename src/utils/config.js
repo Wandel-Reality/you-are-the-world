@@ -27,6 +27,9 @@ export const CONFIG = {
     line: 0xf0df9a,
     circleCore: 0x0a0b10,
     circleGlow: 0xf6e7a8,
+    particleGold: 0xf0dfa8,
+    particleBlue: 0x5b73b3,
+    hazeBlue: 0x09101f,
   },
 
   circle: {
@@ -51,5 +54,19 @@ export const CONFIG = {
   connectors: {
     curveStrength: 0.18,
     subdivisions: 20,
+  },
+  particles: {
+    count: 80,
+    baseSize: 18,
+    driftAmount: 0.18,
+    opacity: 0.08,
+    audioOpacityBoost: 0.05,
+    audioSizeBoost: 0.1,
+  },
+  dust: {
+    count: 140,
+    baseSize: 1,
+    opacity: 0.06,
+    driftAmount: 0.08,
   },
 };
