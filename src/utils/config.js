@@ -10,7 +10,7 @@ export const CONFIG = {
     count: 130,
     baseRadius: 0.28,
     revealSpeed: 0.03,
-    lineDistance: 15,
+    lineDistance: 7,
     driftAmount: 0.8,
     lineOpacity: 0.1,
 

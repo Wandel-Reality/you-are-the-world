@@ -25,6 +25,8 @@ export class NodeField {
       peak: 0,
     };
 
+    this.bassBlink = 0;
+
     this.nodeGroup = new THREE.Group();
     this.lineGroup = new THREE.Group();
     this.organicGroup = new THREE.Group();
@@ -82,6 +84,8 @@ export class NodeField {
         organicRotation: (Math.random() - 0.5) * Math.PI,
         organicTiltSeed: Math.random() * 1000,
         activationGlow: 0,
+        deathEligible: Math.random() < 0.6,
+        deathBurst: 0,
         visualOffset: new THREE.Vector3(0, 0, 0),
 
         organic: this.createOrganicVisual(baseRadius),
@@ -180,6 +184,15 @@ export class NodeField {
     const outline = new THREE.LineLoop(outlineGeometry, outlineMaterial);
     group.add(outline);
 
+    // Second overlapping outline to simulate thicker stroke
+    const OUTLINE_INNER_SCALE = 0.96;
+    const outline2 = new THREE.LineLoop(
+      outlineGeometry,
+      outlineMaterial.clone(),
+    );
+    outline2.scale.setScalar(OUTLINE_INNER_SCALE);
+    group.add(outline2);
+
     // Small central core
     const coreGeo = new THREE.CircleGeometry(baseRadius * 0.42, 18);
     const coreMat = new THREE.MeshBasicMaterial({
@@ -217,8 +230,19 @@ export class NodeField {
       const angle = Math.random() * Math.PI * 2;
       const targetRadiusScale = 0.55 + Math.random() * 0.35;
 
+      // 30% of strands get a duplicate line for visible thickness
+      const THICK_STRAND_CHANCE = 0.3;
+      const thickStrand = Math.random() < THICK_STRAND_CHANCE;
+      let strandLine2 = null;
+      if (thickStrand) {
+        strandLine2 = new THREE.Line(new THREE.BufferGeometry(), material.clone());
+        group.add(strandLine2);
+      }
+
       strands.push({
         line,
+        line2: strandLine2,
+        thick: thickStrand,
         seed: Math.random() * 1000,
         angle,
         targetRadiusScale,
@@ -282,8 +306,19 @@ export class NodeField {
       const line = new THREE.Line(geometry, material);
       group.add(line);
 
+      // 30% of filaments get a duplicate line for visual thickness
+      const THICK_FILAMENT_CHANCE = 0.3;
+      const thick = Math.random() < THICK_FILAMENT_CHANCE;
+      let line2 = null;
+      if (thick) {
+        line2 = new THREE.Line(new THREE.BufferGeometry(), material.clone());
+        group.add(line2);
+      }
+
       filaments.push({
         line,
+        line2,
+        thick,
         seed: Math.random() * 1000,
         offset: i / 5,
       });
@@ -292,6 +327,7 @@ export class NodeField {
     return {
       group,
       outline,
+      outline2,
       core,
       hotspot,
       strands,
@@ -304,6 +340,13 @@ export class NodeField {
 
   update(delta, elapsedTime, audio) {
     this.audio = audio || this.audio;
+
+    // Bass-hit blink: spike on transient peaks, decay back to 0
+    const BLINK_STRENGTH = 4.0;
+    const BLINK_DECAY = 4.0;
+    const peak = this.audio.peak || 0;
+    this.bassBlink = Math.min(1, this.bassBlink + peak * BLINK_STRENGTH);
+    this.bassBlink = Math.max(0, this.bassBlink - delta * BLINK_DECAY);
 
     this.updateReveal(delta);
     this.updateDrift(elapsedTime);
@@ -375,10 +418,13 @@ export class NodeField {
   updateDrift(elapsedTime) {
     const bass = this.audio?.bass || 0;
 
-    const bassBoost = 1 + bass * 2.5;
+    const normalBassBoost = 1 + bass * 3.0;
+    const organicBassBoost = 1 + bass * 9.0;
 
     for (const node of this.nodes) {
       if (!node.revealed) continue;
+
+      const bassBoost = node.state > 0 ? organicBassBoost : normalBassBoost;
 
       const dx =
         Math.sin(elapsedTime * 0.9 + node.driftSeedX) *
@@ -404,6 +450,24 @@ export class NodeField {
         node.pulse - delta * CONFIG.nodes.pulseDecaySpeed,
       );
 
+      // Inactivity death for eligible organic nodes
+      const INACTIVITY_DEATH_TIME = 10.0;
+      const BURST_DURATION = 0.5;
+
+      if (node.state > 0 && node.deathEligible && node.deathBurst <= 0) {
+        if (elapsedTime - node.lastTouchTime > INACTIVITY_DEATH_TIME) {
+          node.deathBurst = 1.0;
+        }
+      }
+
+      if (node.deathBurst > 0) {
+        node.deathBurst = Math.max(0, node.deathBurst - delta / BURST_DURATION);
+        if (node.deathBurst <= 0) {
+          node.state = 0;
+          node.pulse = 0;
+        }
+      }
+
       if (node.state <= 0) {
         const shimmer = Math.sin(elapsedTime * 2.0 + node.driftSeedX) * 0.03;
 
@@ -411,8 +475,9 @@ export class NodeField {
         node.mesh.material.color
           .copy(node.baseColor)
           .lerp(node.touchedColor, Math.max(0, shimmer));
+        const dataTargetOpacity = 0.95 - this.bassBlink * 0.55;
         node.mesh.material.opacity +=
-          (0.95 - node.mesh.material.opacity) * 0.08;
+          (dataTargetOpacity - node.mesh.material.opacity) * 0.35;
       } else {
         // Once transformed, the base node should stop dominating
         node.mesh.scale.set(1, 1, 1);
@@ -467,12 +532,12 @@ export class NodeField {
 
   updateOrganicNode(node, elapsedTime) {
     const organic = node.organic;
-    const active = node.state > 0 || node.pulse > 0.05;
+    const active = node.state > 0 || node.pulse > 0.05 || node.deathBurst > 0;
 
     organic.group.visible = active;
     if (!active) return;
 
-    node.activationGlow = Math.max(0, node.activationGlow - 0.012);
+    node.activationGlow = Math.max(0, node.activationGlow - 0.015);
 
     organic.group.position.copy(node.mesh.position).add(node.visualOffset);
     organic.group.position.z = 0.5;
@@ -492,8 +557,9 @@ export class NodeField {
     node.mesh.material.opacity +=
       (nodeOpacityTarget - node.mesh.material.opacity) * 0.12;
 
-    // Cocoon outline
+    // Cocoon outline (outline2 mirrors opacity for double-stroke thickness)
     organic.outline.material.opacity = 0.14 + life * 0.24;
+    organic.outline2.material.opacity = organic.outline.material.opacity;
 
     // Core and hotspot with activation glow burst
     const glowBoost = node.activationGlow * 0.55;
@@ -580,7 +646,8 @@ export class NodeField {
         new THREE.Vector3(endX, endY, 0.01),
       );
 
-      strand.line.geometry.setFromPoints(curve.getPoints(16));
+      const strandPoints = curve.getPoints(16);
+      strand.line.geometry.setFromPoints(strandPoints);
       const peak = this.audio?.peak || 0;
 
       strand.line.material.opacity =
@@ -588,6 +655,11 @@ export class NodeField {
         life * (0.1 + strand.thicknessBias * 0.07) +
         glowBoost * 0.1 +
         peak * 0.25;
+
+      if (strand.thick && strand.line2) {
+        strand.line2.geometry.setFromPoints(strandPoints);
+        strand.line2.material.opacity = strand.line.material.opacity;
+      }
     }
 
     // Outer wispy filaments
@@ -617,8 +689,34 @@ export class NodeField {
         new THREE.Vector3(endX, endY, 0.01),
       );
 
-      filament.line.geometry.setFromPoints(curve.getPoints(12));
+      const filamentPoints = curve.getPoints(12);
+      filament.line.geometry.setFromPoints(filamentPoints);
       filament.line.material.opacity = 0.05 + life * 0.12;
+
+      // Thick filaments: duplicate geometry on line2 for double-stroke
+      if (filament.thick && filament.line2) {
+        filament.line2.geometry.setFromPoints(filamentPoints);
+        filament.line2.material.opacity = filament.line.material.opacity;
+      }
+    }
+
+    // Death burst: expand scale and fade everything to zero
+    if (node.deathBurst > 0) {
+      const fo = node.deathBurst;
+      organic.group.scale.setScalar(1.0 + (1.0 - fo) * 2.0);
+      organic.outline.material.opacity *= fo;
+      organic.outline2.material.opacity *= fo;
+      organic.core.material.opacity *= fo;
+      organic.hotspot.material.opacity *= fo;
+      for (const s of organic.strands) {
+        s.line.material.opacity *= fo;
+        if (s.thick && s.line2) s.line2.material.opacity *= fo;
+      }
+      for (const s of organic.splashes) s.mesh.material.opacity *= fo;
+      for (const f of organic.filaments) {
+        f.line.material.opacity *= fo;
+        if (f.thick && f.line2) f.line2.material.opacity *= fo;
+      }
     }
   }
 
@@ -648,7 +746,7 @@ export class NodeField {
 
         if (timeSinceLastTouch > CONFIG.nodes.touchCooldown) {
           node.state += 1;
-          node.pulse = Math.min(node.pulse + 1.2, 3.0);
+          node.pulse = Math.min(node.pulse + 1.73, 3.0);
           node.activationGlow = 1.0;
           node.lastTouchTime = elapsedTime;
         }
@@ -709,10 +807,13 @@ export class NodeField {
 
         const audioBoost = mids * 0.35;
 
+        const isDataConnector = a.state <= 0 && b.state <= 0;
+        const blinkDip = isDataConnector ? this.bassBlink * 0.55 : 0;
+
         const material = new THREE.LineBasicMaterial({
           color: CONFIG.colors.line,
           transparent: true,
-          opacity: baseOpacity + energyBoost + audioBoost,
+          opacity: Math.max(0, baseOpacity + energyBoost + audioBoost - blinkDip),
         });
 
         const line = new THREE.Line(geometry, material);
