@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { CONFIG } from "../utils/config.js";
 
 export class CircleAgent {
-  constructor(scene) {
+  constructor(scene, ringColor = CONFIG.colors.circleGlow) {
     this.scene = scene;
 
     this.group = new THREE.Group();
@@ -29,12 +29,16 @@ export class CircleAgent {
       64,
     );
     const ringMaterial = new THREE.MeshBasicMaterial({
-      color: CONFIG.colors.circleGlow,
+      color: ringColor,
       transparent: true,
       opacity: 0.45,
       side: THREE.DoubleSide,
     });
     this.ring = new THREE.Mesh(ringGeometry, ringMaterial);
+
+    this.glow.renderOrder = 1;
+    this.core.renderOrder = 1;
+    this.ring.renderOrder = 1;
 
     this.group.add(this.glow);
     this.group.add(this.core);

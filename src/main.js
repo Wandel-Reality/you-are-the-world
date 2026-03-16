@@ -3,21 +3,28 @@ import "./style.css";
 
 import { setupScene } from "./scene/setupScene.js";
 import { NodeField } from "./visuals/nodes.js";
-import { MouseController } from "./controls/mouseController.js";
 import { CircleAgent } from "./visuals/circleAgent.js";
 import { CONFIG } from "./utils/config.js";
 import { AudioInput } from "./audio/audioInput.js";
 import { ParticleField } from "./visuals/particleField.js";
+import { MediaPipeTracking } from "./tracking/mediapipeTracking.js";
 
 const { scene, camera, renderer } = setupScene();
 
 const timer = new THREE.Timer();
 const nodeField = new NodeField(scene);
-const mouseController = new MouseController(camera);
-const circleAgent = new CircleAgent(scene);
 const particleField = new ParticleField(scene);
-
 const audioInput = new AudioInput();
+
+// Single circle — controlled by the performer in the center zone
+const circle = new CircleAgent(scene, CONFIG.colors.circleRingColors[1]);
+circle.group.position.set(0, 0, 2);
+circle.currentPosition.set(0, 0, 2);
+circle.targetPosition.set(0, 0, 2);
+
+// MediaPipe tracking — initialises async, falls back gracefully
+const tracking = new MediaPipeTracking();
+tracking.init();
 
 await audioInput.initFromFile("/audio/test-track.mp3");
 
@@ -46,17 +53,14 @@ function animate() {
   const delta = timer.getDelta();
   const elapsedTime = timer.getElapsed();
 
-  const targetWorld = mouseController.update();
   const audio = audioInput.update();
   particleField.update(elapsedTime, audio);
   nodeField.update(delta, elapsedTime, audio);
-  circleAgent.update(targetWorld, elapsedTime);
 
-  nodeField.interactWithCircle(
-    circleAgent.group.position,
-    CONFIG.circle.radius,
-    elapsedTime,
-  );
+  // Update tracking and drive the single circle from the center-zone performer
+  tracking.update();
+  circle.update(tracking.getCenterPosition(), elapsedTime);
+  nodeField.interactWithCircle(circle.group.position, CONFIG.circle.radius, elapsedTime);
 
   if (elapsedTime - lastAudioLogTime > 0.5) {
     console.log({
